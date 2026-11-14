@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import base64
 import sqlite3
@@ -11,10 +12,15 @@ from telebot import types
 
 # ----------------- КОНФИГУРАЦИЯ -----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "9235975896:AAFbwppKTIT9XXDK_skvCmWMnTofmumHXtI")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6J-QQAHPjh0IOXl-wXp6akDqgsxNFLW3pyaegJHa6XTgA")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
 
-# Модели Gemini для fallback
-GEMINI_MODELS = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash", "gemini-pro-latest"]
+# Бесплатные модели с поддержкой зрения на OpenRouter
+VISION_MODELS = [
+    "nvidia/nemotron-3.5-super-vl:free",
+    "thinkingmachines/inkling-2-small:free",
+    "dots-studio/dots-3-note-preview:free",
+    "google/gemma-4-31b-it:free"
+]
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 
@@ -136,74 +142,89 @@ def make_progress_bar(current: float, goal: int, length: int = 10) -> str:
     bar = "🟩" * filled + "⬜" * (length - filled)
     return f"{bar} {int(percent * 100)}%"
 
-# ----------------- ИНТЕГРАЦИЯ С GEMINI API -----------------
-def analyze_with_gemini(image_bytes=None, text_desc=None) -> dict:
-    """
-    Отправляет фото или текст в Gemini API и получает структурированный расчет КБЖУ.
-    """
+# ----------------- АНАЛИЗ ЕДЫ ЧЕРЕЗ OPENROUTER VISION -----------------
+def analyze_food(image_bytes=None, text_desc=None) -> dict:
     prompt = """
-Ты — профессиональный ИИ-нутрициолог и анализатор питания (как в приложении YAZIO).
-Проанализируй входящее изображение еды (или текстовое описание блюда) и максимально точно определи:
+Ты — профессиональный ИИ-диетолог и счётчик калорий (аналог приложения YAZIO).
+Твоя задача — внимательно проанализировать изображение еды (или текст) и определить:
 1. Название блюда или продуктов
 2. Примерный вес порции в граммах (целое число)
-3. Калорийность (ккал, число)
-4. Белки (г, число)
-5. Жиры (г, число)
-6. Углеводы (г, число)
-7. Короткий практичный комментарий (1-2 предложения о пользе, балансе нутриентов или рекомендациях).
+3. Калории (ккал)
+4. Белки (г)
+5. Жиры (г)
+6. Углеводы (г)
+7. Короткий комментарий (1-2 предложения о пользе, балансе макросов или витаминах).
 
-Верни СТРОГО валидный JSON-объект без пояснений до или после, без markdown-кавычек ```json.
-Формат JSON:
+ОТВЕТ ВЕРНИ СТРОГО В ВИДЕ ВАЛИДНОГО JSON-ОБЪЕКТА (без пояснений, без markdown):
 {
   "title": "Название блюда",
-  "weight_g": 300,
-  "calories": 450,
-  "protein": 24.5,
-  "fat": 14.0,
-  "carb": 56.0,
-  "comment": "Отличный баланс сложных углеводов и белка для восстановления сил."
+  "weight_g": 250,
+  "calories": 420,
+  "protein": 22.0,
+  "fat": 14.5,
+  "carb": 51.0,
+  "comment": "Отличный баланс питательных веществ и белков."
 }
 """
 
-    parts = []
+    user_content = []
     if image_bytes:
-        b64_image = base64.b64encode(image_bytes).decode("utf-8")
-        parts.append({
-            "inline_data": {
-                "mime_type": "image/jpeg",
-                "data": b64_image
-            }
+        b64_img = base64.b64encode(image_bytes).decode("utf-8")
+        user_content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}
         })
     if text_desc:
-        parts.append({"text": f"Дополнительное описание блюда от пользователя: {text_desc}"})
-    parts.append({"text": prompt})
+        user_content.append({
+            "type": "text",
+            "text": f"Описание от пользователя: {text_desc}"
+        })
+    user_content.append({
+        "type": "text",
+        "text": prompt
+    })
 
-    headers = {"Content-Type": "application/json"}
-    payload = {"contents": [{"parts": parts}]}
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/glizzleglizzle/calorie-bot",
+        "X-Title": "Calorie Tracker Bot"
+    }
 
     last_error = None
-    for model_name in GEMINI_MODELS:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+    for model_name in VISION_MODELS:
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "user", "content": user_content}
+            ],
+            "temperature": 0.2
+        }
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=30)
+            resp = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=35
+            )
             if resp.status_code == 200:
-                data = resp.json()
-                raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                # Очистка от ```json
-                if raw_text.startswith("```json"):
-                    raw_text = raw_text[7:]
-                if raw_text.startswith("```"):
-                    raw_text = raw_text[3:]
-                if raw_text.endswith("```"):
-                    raw_text = raw_text[:-3]
-                raw_text = raw_text.strip()
-                return json.loads(raw_text)
+                result = resp.json()
+                raw_text = result["choices"][0]["message"]["content"].strip()
+
+                # Извлекаем JSON из ответа
+                match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+                if match:
+                    json_str = match.group(0)
+                else:
+                    json_str = raw_text
+
+                return json.loads(json_str)
             else:
                 last_error = f"{model_name} HTTP {resp.status_code}: {resp.text}"
         except Exception as e:
             last_error = f"{model_name} error: {e}"
 
-    raise RuntimeError(f"Не удалось получить ответ от нейросети: {last_error}")
+    raise RuntimeError(f"Не удалось получить ответ: {last_error}")
 
 # ----------------- КОМАНДЫ БОТА -----------------
 @bot.message_handler(commands=["start"])
@@ -212,9 +233,9 @@ def cmd_start(message):
     goal = get_user_goal(user_id)
     text = (
         f"👋 <b>Привет, {message.from_user.first_name}!</b>\n\n"
-        "Я твой персональный <b>ИИ-трекер питания и калорий</b> (аналог YAZIO прямо в Telegram).\n\n"
+        "Я твой персональный <b>ИИ-трекер питания и калорий</b> (полный аналог YAZIO в Telegram).\n\n"
         "📸 <b>Как мной пользоваться:</b>\n"
-        "• Просто <b>сфотографируй и отправь тарелку с едой</b> — я сам определю блюдо, посчитаю вес, калории и БЖУ.\n"
+        "• Просто <b>сфотографируй и отправь тарелку с едой</b> — я распознаю блюдо, посчитаю вес, калории и БЖУ.\n"
         "• Или напиши текстом: <i>«2 вареных яйца и кофе с молоком»</i>.\n\n"
         f"🎯 Твоя текущая дневная цель: <b>{goal} ккал</b> (можно изменить кнопкой «Моя цель»)."
     )
@@ -305,12 +326,11 @@ def handle_photo(message):
     status_msg = bot.send_message(chat_id, "🔍 <i>Анализирую фото блюда и рассчитываю КБЖУ...</i>")
 
     try:
-        # Скачиваем самое качественное фото из массива
         file_info = bot.get_file(message.photo[-1].file_id)
         image_bytes = bot.download_file(file_info.file_path)
 
         caption = message.caption if message.caption else None
-        data = analyze_with_gemini(image_bytes=image_bytes, text_desc=caption)
+        data = analyze_food(image_bytes=image_bytes, text_desc=caption)
 
         title = data.get("title", "Блюдо")
         weight_g = int(data.get("weight_g", 200))
@@ -320,7 +340,6 @@ def handle_photo(message):
         carb = float(data.get("carb", 0))
         comment = data.get("comment", "")
 
-        # Сохраняем в дневник
         add_meal(user_id, title, weight_g, calories, protein, fat, carb)
 
         goal = get_user_goal(user_id)
@@ -360,7 +379,7 @@ def handle_text(message):
     status_msg = bot.send_message(chat_id, "🔍 <i>Оцениваю калорийность блюда...</i>")
 
     try:
-        data = analyze_with_gemini(text_desc=text)
+        data = analyze_food(text_desc=text)
         title = data.get("title", text)
         weight_g = int(data.get("weight_g", 200))
         calories = float(data.get("calories", 0))
