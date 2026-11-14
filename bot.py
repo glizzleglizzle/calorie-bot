@@ -11,7 +11,7 @@ from telebot import types
 
 # ----------------- КОНФИГУРАЦИЯ -----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "9235975896:AAFbwppKTIT9XXDK_skvCmWMnTofmumHXtI")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6KRyCzT1pCFecZkj9hgBPf0VT0wlLJI_5YuOg6VpBU3rg")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6J-QQAHPjh0IOXl-wXp6akDqgsxNFLW3pyaegJHa6XTgA")
 
 # Модели Gemini для fallback
 GEMINI_MODELS = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash", "gemini-pro-latest"]
