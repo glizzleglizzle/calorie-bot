@@ -12,7 +12,7 @@ from telebot import types
 
 # ----------------- КОНФИГУРАЦИЯ -----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "9235975896:AAFbwppKTIT9XXDK_skvCmWMnTofmumHXtI")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
 
 # Бесплатные модели с поддержкой зрения на OpenRouter
 VISION_MODELS = [
